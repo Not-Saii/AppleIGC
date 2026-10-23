@@ -17,7 +17,7 @@ jobs:
         run: |
           python3 tools/igc_trace_patch.py
           python3 tools/igc_poll_patch.py
-          python3 tools/igc_wait_patch.py
+          python3 tools/igc_sample_patch.py
 
       - name: Build (Debug, x86_64, IGC_TRACE + CR_DEBUG)
         run: |
@@ -25,7 +25,7 @@ jobs:
             -configuration Debug ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
             GCC_PREPROCESSOR_DEFINITIONS='DEBUG=1 __PRIVATE_SPI__ IGC_TRACE=1 CR_DEBUG=1' \
-            CURRENT_PROJECT_VERSION=1.9d79
+            CURRENT_PROJECT_VERSION=1.9d80
 
       - name: Package
         run: |
