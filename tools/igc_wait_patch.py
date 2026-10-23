@@ -15,7 +15,9 @@ import pathlib, sys
 p = pathlib.Path("AppleIGC/AppleIGC.cpp")
 s = p.read_text()
 if "#include <IOKit/pci/IOPCIBridge.h>" not in s:
-    s = s.replace('#include "AppleIGC.hpp"\n', '#include "AppleIGC.hpp"\n#include <IOKit/pci/IOPCIBridge.h>\n', 1)
+    s = s.replace('#include "AppleIGC.hpp"\n', '#include "AppleIGC.hpp"\n#include <IOKit/pci/IOPCIBridge.h>\n'
+                  '#undef ALIGN  // the IOKit header redefines it; restore the kcompat.h one\n'
+                  '#define ALIGN(x,a) (((x)+(a)-1)&~((a)-1))\n', 1)
 anchor = '    if (pdev->open(this) == false) {\n        pr_err("pdev->open failed\\n");\n        return false;\n    }\n'
 if s.count(anchor) != 1:
     sys.exit("anchor not found (apply igc_trace_patch.py first)")
