@@ -5,11 +5,13 @@ chipset switch the Lexar NVMe shares with the I225-V).
 Read-only timeline: at the first start(), schedule 4 samples at +5/+15/+30/+60 s.
 Each sample reads the I225-V's vendor ID through pdev and through the parent
 bridge, plus DP50's own vendor ID (sanity check), Link Control/Status and Slot
-Control/Status (one 32-bit read each). The PCIe capability offset comes from
-findPCICapability()'s out parameter (1.9d80 used its return value by mistake,
-which is the capability register). No writes, no loops. The samples run from
-a thread_call, so they keep going after start() fails, and land in
-AppleIGC-trace."""
+Control/Status (one 32-bit read each). 1.9d82 adds DP50-only reads: bus numbers
+(0x18), secondary status (0x1C), bridge control (0x3C), device control/status
+(PCIe cap + 0x08) and AER uncorrectable/correctable status (AER + 0x04 / 0x10).
+The PCIe capability offset comes from findPCICapability()'s out parameter
+(1.9d80 used its return value by mistake, which is the capability register).
+No writes, no loops. The samples run from a thread_call, so they keep going
+after start() fails, and land in AppleIGC-trace."""
 import pathlib, sys
 
 SAMPLES_S = [5, 15, 30, 60]
@@ -48,6 +50,7 @@ static const UInt32 kIgcSampleS[] = { ''' + delays + r''' };
 static IOPCIDevice *gSampDev, *gSampDP;
 static IOPCIBridge *gSampBr;
 static UInt32 gSampCap;
+static IOByteCount gSampAer;
 static uint64_t gSampT0;
 static thread_call_t gSampCall;
 
@@ -63,6 +66,17 @@ static void igc_sample(thread_call_param_t, thread_call_param_t p1) {
     igc_trace(PFX "sample %lu +%llu ms: id 0x%08x via bridge 0x%08x inactive %d | DP50 id 0x%08x lnkctl 0x%04x lnksta 0x%04x sltctl 0x%04x sltsta 0x%04x\n",
            (unsigned long)i + 1, ns / 1000000ULL, id, bid, gSampDev->isInactive(), dpid,
            lnk & 0xffff, lnk >> 16, slt & 0xffff, slt >> 16);
+    if (gSampDP) {  // DP50 only: bus numbers, secondary status, bridge control, device status, AER
+        UInt32 bus = gSampDP->configRead32(0x18);
+        UInt32 sec = gSampDP->configRead32(0x1c);
+        UInt32 bctl = gSampDP->configRead32(0x3c);
+        UInt32 dev = gSampCap ? gSampDP->configRead32(gSampCap + 0x08) : 0xdeadbeef;
+        UInt32 ue = gSampAer ? gSampDP->configRead32(gSampAer + 0x04) : 0xdeadbeef;
+        UInt32 ce = gSampAer ? gSampDP->configRead32(gSampAer + 0x10) : 0xdeadbeef;
+        igc_trace(PFX "  DP50 bus pri %u sec %u sub %u | secsta 0x%04x | brctl 0x%04x | devctl 0x%04x devsta 0x%04x | aer ue 0x%08x ce 0x%08x\n",
+               bus & 0xff, (bus >> 8) & 0xff, (bus >> 16) & 0xff, sec >> 16, bctl >> 16,
+               dev & 0xffff, dev >> 16, ue, ce);
+    }
     gSampDev->setProperty("AppleIGC-trace", gIgcTraceBuf);  // start() may have cleared the provider
     if (++i < sizeof(kIgcSampleS) / sizeof(kIgcSampleS[0])) {
         uint64_t want;  // deadlines are relative to t0, not to this sample
@@ -88,11 +102,14 @@ static void igc_start_sampler(IOPCIDevice *pdev) {
             UInt8 off = 0;  // the return value is the capability register, the offset comes back here
             if (gSampDP->findPCICapability(0x10, &off))  // PCI Express capability ID
                 gSampCap = off;
+            IOByteCount aer = 0;
+            if (gSampDP->extendedFindPCICapability(kIOPCIExpressErrorReportingCapability, &aer))
+                gSampAer = aer;
         }
     }
-    igc_trace(PFX "sampler: bridge %s, DP %s, DP PCIe cap 0x%x, samples at +%u/+%u/+%u/+%u s\n",
+    igc_trace(PFX "sampler: bridge %s, DP %s, DP PCIe cap 0x%x, AER 0x%x, samples at +%u/+%u/+%u/+%u s\n",
            gSampBr ? gSampBr->getName() : "none", gSampDP ? gSampDP->getName() : "none",
-           (unsigned)gSampCap, kIgcSampleS[0], kIgcSampleS[1], kIgcSampleS[2], kIgcSampleS[3]);
+           (unsigned)gSampCap, (unsigned)gSampAer, kIgcSampleS[0], kIgcSampleS[1], kIgcSampleS[2], kIgcSampleS[3]);
     gSampT0 = mach_absolute_time();
     gSampCall = thread_call_allocate(igc_sample, NULL);
     uint64_t deadline;
