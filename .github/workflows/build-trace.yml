@@ -1,0 +1,37 @@
+name: Build AppleIGC trace build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master, main ]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Apply trace patch
+        run: python3 tools/igc_trace_patch.py
+
+      - name: Build (Debug, x86_64, IGC_TRACE + CR_DEBUG)
+        run: |
+          xcodebuild -project AppleIGC.xcodeproj -target AppleIGC \
+            -configuration Debug ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
+            GCC_PREPROCESSOR_DEFINITIONS='DEBUG=1 __PRIVATE_SPI__ IGC_TRACE=1 CR_DEBUG=1' \
+            CURRENT_PROJECT_VERSION=1.9trace
+
+      - name: Package
+        run: |
+          cd build/Debug
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' AppleIGC.kext/Contents/Info.plist
+          file AppleIGC.kext/Contents/MacOS/AppleIGC
+          ditto -c -k --keepParent AppleIGC.kext AppleIGC-trace.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AppleIGC-trace
+          path: build/Debug/AppleIGC-trace.zip
