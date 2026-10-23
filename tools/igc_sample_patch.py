@@ -11,6 +11,9 @@ Control/Status (one 32-bit read each). 1.9d82 adds DP50-only reads: bus numbers
 1.9d83 adds the same kind of reads on UP00 (switch upstream port) and GPP7
 (root port), plus GPP7's Root Control/Capabilities/Status and root AER error
 status.
+1.9d84 adds one full 4 KB config-space dump of DP50, UP00 and GPP7 at the
+first sample, published as binary ioreg properties AppleIGC-cfg-<name> on the
+I225-V node, to diff against a Linux lspci -xxxx dump. Bridges only, reads only.
 The PCIe capability offset comes from findPCICapability()'s out parameter
 (1.9d80 used its return value by mistake, which is the capability register).
 No writes, no loops. The samples run from a thread_call, so they keep going
@@ -78,6 +81,18 @@ static void igc_dump_bridge(const char *name, IOPCIDevice *d, bool root) {
                   name, rc & 0xffff, rc >> 16, rs, res);
     }
 }
+
+// Full 4 KB config space of one bridge (x86 little-endian, same byte order as
+// lspci -xxxx), kept and re-published on the I225-V node every sample. Reads only.
+static const char *kIgcCfgKey[] = { "AppleIGC-cfg-DP50", "AppleIGC-cfg-UP00", "AppleIGC-cfg-GPP7" };
+static OSData *gSampCfg[3];
+static void igc_dump_cfg(int n, IOPCIDevice *d) {
+    static UInt32 buf[1024];
+    for (UInt32 o = 0; o < sizeof(buf); o += 4)
+        buf[o / 4] = d->configRead32(o);
+    gSampCfg[n] = OSData::withBytes(buf, sizeof(buf));
+    igc_trace(PFX "  cfg dump %s: [0x000] 0x%08x [0x100] 0x%08x\n", kIgcCfgKey[n] + 13, buf[0], buf[64]);
+}
 static uint64_t gSampT0;
 static thread_call_t gSampCall;
 
@@ -106,6 +121,13 @@ static void igc_sample(thread_call_param_t, thread_call_param_t p1) {
     }
     if (gSampUp) igc_dump_bridge("UP00", gSampUp, false);
     if (gSampRp) igc_dump_bridge("GPP7", gSampRp, true);
+    if (i == 0) {  // state is identical in every sample (1.9d81-1.9d83), so dump once
+        if (gSampDP) igc_dump_cfg(0, gSampDP);
+        if (gSampUp) igc_dump_cfg(1, gSampUp);
+        if (gSampRp) igc_dump_cfg(2, gSampRp);
+    }
+    for (int n = 0; n < 3; n++)  // start() may have cleared the provider's properties
+        if (gSampCfg[n]) gSampDev->setProperty(kIgcCfgKey[n], gSampCfg[n]);
     gSampDev->setProperty("AppleIGC-trace", gIgcTraceBuf);  // start() may have cleared the provider
     if (++i < sizeof(kIgcSampleS) / sizeof(kIgcSampleS[0])) {
         uint64_t want;  // deadlines are relative to t0, not to this sample
