@@ -22,7 +22,7 @@ jobs:
             -configuration Debug ARCHS=x86_64 ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY="" \
             GCC_PREPROCESSOR_DEFINITIONS='DEBUG=1 __PRIVATE_SPI__ IGC_TRACE=1 CR_DEBUG=1' \
-            CURRENT_PROJECT_VERSION=1.9trace
+            CURRENT_PROJECT_VERSION=1.9d77
 
       - name: Package
         run: |
